@@ -37,16 +37,17 @@ public class GuiApp extends JFrame {
         setSize(1000, 700);
         setLocationRelativeTo(null);
 
-        // ask for DB file (required by Phase 4)
+
         JFileChooser fc = new JFileChooser();
         fc.setDialogTitle("Select SQLite Database (.db)");
         if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
             JOptionPane.showMessageDialog(this, "No database selected. Exiting.");
             System.exit(0);
         }
-        ConnectionManager.setDatabasePath(fc.getSelectedFile().getAbsolutePath());
+        String selectedDb = fc.getSelectedFile().getAbsolutePath();
+        ConnectionManager.setDatabasePath(selectedDb);
 
-        // now create store
+
         store = new CustomerStore();
 
         addWindowListener(new WindowAdapter() {
@@ -56,11 +57,28 @@ public class GuiApp extends JFrame {
         setLayout(new BorderLayout(5,5));
         buildToolbar();
         add(buildMainPanel(), BorderLayout.CENTER);
+
+        // log setup
+        log.setEditable(false);
+        log.setLineWrap(true);
+        log.setWrapStyleWord(true);
+        log.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            private void scroll(){ log.setCaretPosition(log.getDocument().getLength()); }
+            public void insertUpdate(javax.swing.event.DocumentEvent e){ scroll(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e){ scroll(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e){ scroll(); }
+        });
+
+        // first message
+        logMsg("[DB] " + selectedDb);
+
         refreshTable();
     }
 
+    // simple alerts
     private void info(String m){ JOptionPane.showMessageDialog(this, m); }
     private void warn(String m){ JOptionPane.showMessageDialog(this, m, "Warning", JOptionPane.WARNING_MESSAGE); }
+    private void logMsg(String m){ log.append(m + "\n"); }
 
     private Component buildMainPanel() {
         table.setFillsViewportHeight(true);
@@ -73,7 +91,7 @@ public class GuiApp extends JFrame {
         p.add(new JScrollPane(table), BorderLayout.CENTER);
         p.add(new JScrollPane(log), BorderLayout.SOUTH);
 
-        // search (simple)
+        // search
         searchField.getDocument().addDocumentListener(new DocumentListener() {
             public void insertUpdate(DocumentEvent e) { filter(); }
             public void removeUpdate(DocumentEvent e) { filter(); }
@@ -95,6 +113,7 @@ public class GuiApp extends JFrame {
         tb.add(btn("Delete", e -> onDelete()));
         tb.add(btn("Export All", e -> onExportCsv()));
         tb.addSeparator();
+        tb.add(btn("Clear Log", e -> log.setText("")));
         tb.add(btn("Exit", e -> doExit()));
 
         tb.add(Box.createHorizontalGlue());
@@ -117,7 +136,9 @@ public class GuiApp extends JFrame {
     private void onLoadCsv() {
         JFileChooser c = new JFileChooser();
         if (c.showOpenDialog(this)!=JFileChooser.APPROVE_OPTION) return;
-        info(store.loadFromCsv(c.getSelectedFile().getAbsolutePath()));
+        String msg = store.loadFromCsv(c.getSelectedFile().getAbsolutePath());
+        info(msg);
+        logMsg("[CSV] " + msg);
         refreshTable();
     }
 
@@ -129,12 +150,17 @@ public class GuiApp extends JFrame {
 
         boolean ok = store.saveToCsv(c.getSelectedFile().getAbsolutePath());
         if(ok){
-            info("Export OK\nPath: " + c.getSelectedFile().getAbsolutePath());
+            String path = c.getSelectedFile().getAbsolutePath();
+            info("Export OK\nPath: " + path);
+            logMsg("[CSV] Exported: " + path);
             try { Desktop.getDesktop().open(c.getSelectedFile()); } catch(Exception ignored){}
-        } else warn("Export failed");
+        } else {
+            warn("Export failed");
+            logMsg("[CSV] Export failed");
+        }
     }
 
-    // simple form panel
+    // simple form
     private JPanel makeForm(JTextField ph, JTextField nm, JTextField ad, JTextField em){
         JPanel p=new JPanel(new GridLayout(4,2,5,5));
         p.add(new JLabel("Phone (digits only):")); p.add(ph);
@@ -169,6 +195,7 @@ public class GuiApp extends JFrame {
         if (store.getByPhone(phone) != null) { warn("Phone already exists."); return; }
 
         if (!store.insert(new Customer(phone,name,addr,email))) { warn("Insert failed."); return; }
+        logMsg("[ADD] " + phone + " | " + name);
         refreshTable();
     }
 
@@ -207,6 +234,7 @@ public class GuiApp extends JFrame {
             warn("Update failed.");
             return;
         }
+        logMsg("[UPDATE] " + phone + " | " + newName);
         refreshTable();
     }
 
@@ -220,7 +248,11 @@ public class GuiApp extends JFrame {
 
         if(JOptionPane.showConfirmDialog(this,"Delete?","Confirm",
                 JOptionPane.YES_NO_OPTION)==JOptionPane.YES_OPTION){
-            store.delete(ph);
+            if (store.delete(ph)) {
+                logMsg("[DELETE] " + ph);
+            } else {
+                logMsg("[DELETE] failed " + ph);
+            }
             refreshTable();
         }
     }
@@ -232,6 +264,7 @@ public class GuiApp extends JFrame {
         for(Customer c:rows){
             tableModel.addRow(new Object[]{c.getPhoneNumber(),c.getName(),c.getAddress(),c.getEmail()});
         }
+        logMsg("[REFRESH] rows=" + rows.size());
     }
 
     private void doExit(){
@@ -244,7 +277,12 @@ public class GuiApp extends JFrame {
     // search
     private void filter(){
         String t=searchField.getText().trim();
-        if(t.isEmpty()) sorter.setRowFilter(null);
-        else sorter.setRowFilter(RowFilter.regexFilter("(?i)"+t));
+        if(t.isEmpty()) {
+            sorter.setRowFilter(null);
+            logMsg("[SEARCH] cleared");
+        } else {
+            sorter.setRowFilter(RowFilter.regexFilter("(?i)"+t));
+            logMsg("[SEARCH] '" + t + "'");
+        }
     }
 }
